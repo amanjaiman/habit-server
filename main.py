@@ -1,15 +1,24 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 from typing import List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from datetime import datetime
 from passlib.context import CryptContext
+from fastapi.middleware.cors import CORSMiddleware
 
 # Initialize FastAPI app
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # MongoDB connection details
 MONGO_URI = os.environ.get("MONGO_URI")
@@ -59,6 +68,14 @@ class UserHabits(BaseModel):
         json_encoders = {
             ObjectId: str
         }
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class ToggleCompletionRequest(BaseModel):
+    date: str
+    completed: bool
 
 @app.get("/")
 async def read_root():
@@ -132,15 +149,14 @@ async def delete_user(user_id: str):
 
 # Add login endpoint
 @app.post("/login")
-async def login(email: str, password: str):
-    user = await user_collection.find_one({"email": email})
+async def login(login_request: LoginRequest):
+    user = await user_collection.find_one({"email": login_request.email})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    if not pwd_context.verify(password, user["password"]):
+    if not pwd_context.verify(login_request.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Convert MongoDB document to User model
     user["id"] = str(user["_id"])
     del user["_id"]
     return user
@@ -201,15 +217,14 @@ async def update_habit(user_id: str, habit_id: str, updated_habit: HabitBase):
 async def toggle_habit_completion(
     user_id: str,
     habit_id: str,
-    date: str,
-    completed: bool
+    toggle_request: ToggleCompletionRequest
 ):
     update_result = await habit_collection.update_one(
         {
             "userId": user_id,
             "habits.id": habit_id
         },
-        {"$set": {f"habits.$.completions.{date}": completed}}
+        {"$set": {f"habits.$.completions.{toggle_request.date}": toggle_request.completed}}
     )
     
     if update_result.modified_count == 0:

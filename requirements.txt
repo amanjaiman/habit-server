@@ -4,3 +4,4 @@ passlib
 pydantic
 pymongo
 uvicorn
+fastapi-cors
