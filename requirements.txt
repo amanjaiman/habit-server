@@ -3,3 +3,4 @@ motor
 passlib
 pydantic
 pymongo
+uvicorn
