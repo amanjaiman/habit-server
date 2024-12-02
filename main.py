@@ -42,8 +42,8 @@ class User(BaseModel):
     password: str
     name: str
     isPremium: bool = False
-    createdAt: str = None
-    profileImage: str = None
+    createdAt: Optional[str] = None
+    profileImage: Optional[str] = None
 
     class Config:
         json_encoders = {
