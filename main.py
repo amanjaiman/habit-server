@@ -19,9 +19,18 @@ from models import (
     ToggleCompletionRequest
 )
 from scheduler import init_scheduler
+from contextlib import asynccontextmanager
 
 # Initialize FastAPI app
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    init_scheduler()
+    yield
+    # Shutdown
+    pass
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -226,8 +235,3 @@ async def get_analytics(user_id: str):
     if not analytics:
         return UserAnalytics(userId=user_id, analytics=[])
     return analytics
-
-# Add this after your FastAPI app initialization
-@app.router.on_startup
-async def startup_event():
-    init_scheduler()
