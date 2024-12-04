@@ -2,12 +2,23 @@ import os
 
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from datetime import datetime
 from passlib.context import CryptContext
 from fastapi.middleware.cors import CORSMiddleware
+from models import (
+    User,
+    HabitBase,
+    KeyInsight,
+    Analytics,
+    UserHabits,
+    UserAnalytics,
+    LoginRequest,
+    ToggleCompletionRequest
+)
+from scheduler import init_scheduler
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -25,57 +36,17 @@ MONGO_URI = os.environ.get("MONGO_URI")
 DATABASE_NAME = os.environ.get("MONGO_DATABASE_NAME", "")
 USER_COLLECTION_NAME = os.environ.get("MONGO_USER_COLLECTION_NAME", "")
 HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
+ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
 
 # MongoDB client and collection
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[DATABASE_NAME]
 user_collection = db[USER_COLLECTION_NAME]
 habit_collection = db[HABIT_COLLECTION_NAME]
+analytics_collection = db[ANALYTICS_COLLECTION_NAME]
 
 # Add password hashing utility
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Updated User model to match frontend interface
-class User(BaseModel):
-    id: str = None
-    email: str
-    password: str
-    name: str
-    isPremium: bool = False
-    createdAt: Optional[str] = None
-    profileImage: Optional[str] = None
-
-    class Config:
-        json_encoders = {
-            ObjectId: str
-        }
-
-# Add new Habit models
-class HabitBase(BaseModel):
-    id: str
-    name: str
-    emoji: str
-    color: Optional[str] = None
-    createdAt: str
-    completions: dict[str, bool] = {}
-    category: Optional[str] = None
-
-class UserHabits(BaseModel):
-    userId: str
-    habits: List[HabitBase] = []
-
-    class Config:
-        json_encoders = {
-            ObjectId: str
-        }
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-class ToggleCompletionRequest(BaseModel):
-    date: str
-    completed: bool
 
 @app.get("/")
 async def read_root():
@@ -116,6 +87,10 @@ async def create_user(user: User):
     # Initialize empty habits for the user
     habit_data = UserHabits(userId=str(result.inserted_id), habits=[])
     await habit_collection.insert_one(habit_data.dict())
+
+    # Initialize empty analytics for the user
+    analytics_data = UserAnalytics(userId=str(result.inserted_id), analytics=[])
+    await analytics_collection.insert_one(analytics_data.dict())
     
     return user
 
@@ -243,3 +218,16 @@ async def delete_all_habits(user_id: str):
         raise HTTPException(status_code=404, detail="User habits not found")
     
     return {"message": "All habits deleted successfully"}
+
+# Analytics Endpoints
+@app.get("/users/{user_id}/analytics", response_model=UserAnalytics)
+async def get_analytics(user_id: str):
+    analytics = await analytics_collection.find_one({"userId": user_id})
+    if not analytics:
+        return UserAnalytics(userId=user_id, analytics=[])
+    return analytics
+
+# Add this after your FastAPI app initialization
+@app.router.on_startup
+async def startup_event():
+    init_scheduler()

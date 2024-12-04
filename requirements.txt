@@ -1,7 +1,9 @@
+APScheduler
 bcrypt==4.0.1
 fastapi
 fastapi-cors
 motor
+openai
 passlib
 pydantic
 pymongo
