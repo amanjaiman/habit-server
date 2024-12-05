@@ -16,6 +16,19 @@ class User(BaseModel):
             ObjectId: str
         }
 
+class UserUpdate(BaseModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    name: Optional[str] = None
+    isPremium: Optional[bool] = None
+    profileImage: Optional[str] = None
+
+    class Config:
+        extra = "allow"
+        json_encoders = {
+            ObjectId: str
+        }
+
 class HabitBase(BaseModel):
     id: str
     name: str

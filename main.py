@@ -2,7 +2,7 @@ import os
 
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from datetime import datetime
@@ -10,6 +10,7 @@ from passlib.context import CryptContext
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
     User,
+    UserUpdate,
     HabitBase,
     KeyInsight,
     Analytics,
@@ -103,25 +104,30 @@ async def create_user(user: User):
     
     return user
 
-# Updated update user endpoint to handle all fields
 @app.put("/users/{user_id}", response_model=User)
-async def update_user(user_id: str, updated_user: User):
+async def update_user(user_id: str, updated_fields: UserUpdate):
     existing_user = await user_collection.find_one({"_id": ObjectId(user_id)})
     if not existing_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    update_data = updated_user.dict(exclude={"id"})
+    # Convert to dict and remove None values
+    update_dict = updated_fields.dict(exclude_unset=True, exclude_none=True)
     
     # Hash password if it's being updated
-    if "password" in update_data and update_data["password"]:
-        update_data["password"] = pwd_context.hash(update_data["password"])
+    if "password" in update_dict:
+        update_dict["password"] = pwd_context.hash(update_dict["password"])
     
+    # Update only the provided fields
     update_result = await user_collection.update_one(
         {"_id": ObjectId(user_id)},
-        {"$set": update_data}
+        {"$set": update_dict}
     )
     
-    updated_user.id = user_id
+    # Get and return the updated user
+    updated_user = await user_collection.find_one({"_id": ObjectId(user_id)})
+    updated_user["id"] = str(updated_user["_id"])
+    del updated_user["_id"]
+    
     return updated_user
 
 @app.delete("/users/{user_id}", response_model=dict)
