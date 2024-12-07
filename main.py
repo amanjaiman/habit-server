@@ -293,8 +293,8 @@ async def create_checkout_session(user_id: str):
                 },
             ],
             mode="subscription",
-            success_url="http://localhost:3000/settings?success=true",
-            cancel_url="http://localhost:3000/settings?canceled=true",
+            success_url="https://habitai.netlify.app/settings?success=true",
+            cancel_url="https://habitai.netlify.app/settings?canceled=true",
             metadata={
                 "user_id": user_id,
             },
