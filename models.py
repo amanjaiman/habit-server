@@ -1,6 +1,24 @@
 from typing import List, Optional
 from pydantic import BaseModel
 from bson import ObjectId
+from datetime import datetime
+
+class Subscription(BaseModel):
+    id: str = None
+    userId: str
+    stripeId: str
+    stripeSubscriptionId: str
+    customerEmail: str
+    customerName: str
+    invoiceUrl: str
+    status: str
+    created: str
+    currentPeriodStart: datetime
+    currentPeriodEnd: datetime
+    nextBillingDate: datetime
+    priceId: str
+    cancelAtPeriodEnd: bool = False
+
 
 class User(BaseModel):
     id: str = None

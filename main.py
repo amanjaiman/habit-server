@@ -1,14 +1,16 @@
 import os
 
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Any, List, Optional, Dict
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 from passlib.context import CryptContext
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
+    Subscription,
     User,
     UserUpdate,
     HabitBase,
@@ -21,6 +23,13 @@ from models import (
 )
 from scheduler import init_scheduler
 from contextlib import asynccontextmanager
+
+import stripe
+stripe.api_key = os.environ.get("STRIPE_API_KEY")
+endpoint_secret = os.environ.get("STRIPE_ENDPOINT_SECRET")
+
+# Add this temporary storage (in production, you'd want to use Redis or similar)
+user_id_mapping = {}
 
 # Initialize FastAPI app
 @asynccontextmanager
@@ -35,7 +44,12 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://674e18bf34bb7a4af4439ba7--habitai.netlify.app/", "https://habitai.netlify.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:8000",
+        "https://674e18bf34bb7a4af4439ba7--habitai.netlify.app",
+        "https://habitai.netlify.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,6 +61,7 @@ DATABASE_NAME = os.environ.get("MONGO_DATABASE_NAME", "")
 USER_COLLECTION_NAME = os.environ.get("MONGO_USER_COLLECTION_NAME", "")
 HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
 ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
+SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAME", "")
 
 # MongoDB client and collection
 client = AsyncIOMotorClient(MONGO_URI)
@@ -54,6 +69,7 @@ db = client[DATABASE_NAME]
 user_collection = db[USER_COLLECTION_NAME]
 habit_collection = db[HABIT_COLLECTION_NAME]
 analytics_collection = db[ANALYTICS_COLLECTION_NAME]
+subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
 
 # Add password hashing utility
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -241,3 +257,181 @@ async def get_analytics(user_id: str):
     if not analytics:
         return UserAnalytics(userId=user_id, analytics=[])
     return analytics
+
+# Stripe Endpoints
+@app.get("/users/{user_id}/subscription")
+async def get_subscription(user_id: str):
+    try:
+        subscription = await subscription_collection.find_one({"userId": user_id})
+        if not subscription:
+            return {"userId": user_id, "status": "none"}
+        
+        # Convert MongoDB ObjectId to string
+        if "_id" in subscription:
+            subscription["_id"] = str(subscription["_id"])
+        
+        # Convert datetime objects to ISO format strings
+        datetime_fields = ["currentPeriodStart", "currentPeriodEnd", "nextBillingDate"]
+        for field in datetime_fields:
+            if field in subscription and subscription[field]:
+                subscription[field] = subscription[field].isoformat()
+        
+        return subscription
+    except Exception as e:
+        print(f"Error fetching subscription: {str(e)}")  # Add logging for debugging
+        return {"userId": user_id, "status": "none"}
+
+@app.post("/users/{user_id}/create-checkout-session")
+async def create_checkout_session(user_id: str):
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price": "price_1QSo6pLtlL58rL0tGRHLE6tt",
+                    "quantity": 1,
+                },
+            ],
+            mode="subscription",
+            success_url="http://localhost:3000/settings?success=true",
+            cancel_url="http://localhost:3000/settings?canceled=true",
+            metadata={
+                "user_id": user_id,
+            },
+        )
+        return {"url": session.url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    event = None
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        print("Error: Invalid payload")
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError as e:
+        print("Error: Invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    event_type = event['type']
+    event_data = event.data.object
+
+    if event_type == 'checkout.session.completed':
+        print("Handling checkout.session.completed event")
+        user_id_mapping[event_data.customer] = event_data.metadata.get('user_id')
+        
+    elif event_type == 'customer.subscription.created':
+        print("Handling customer.subscription.created event")
+        customer_id = event_data.customer
+        user_id = user_id_mapping.get(customer_id)
+        
+        if user_id:
+            try:
+                # Fetch customer details
+                customer = stripe.Customer.retrieve(customer_id)
+                
+                subscription_data = {
+                    "userId": user_id,
+                    "stripeId": customer_id,
+                    "stripeSubscriptionId": event_data.id,
+                    "customerEmail": customer.email,
+                    "customerName": customer.name,
+                    "status": event_data.status,
+                    "created": datetime.fromtimestamp(event_data.created, tz=timezone.utc).isoformat(),
+                    "currentPeriodStart": datetime.fromtimestamp(event_data.current_period_start, tz=timezone.utc),
+                    "currentPeriodEnd": datetime.fromtimestamp(event_data.current_period_end, tz=timezone.utc),
+                    "nextBillingDate": datetime.fromtimestamp(event_data.current_period_end, tz=timezone.utc),
+                    "priceId": event_data["plan"]["id"],
+                    "cancelAtPeriodEnd": event_data["cancel_at_period_end"]
+                }
+                
+                print(f"Attempting to insert subscription data: {subscription_data}")
+                result = await subscription_collection.insert_one(subscription_data)
+                print(f"Insert result: {result.inserted_id}")
+                
+                # Clean up mapping
+                user_id_mapping.pop(customer_id, None)
+            except Exception as e:
+                print(f"Error processing subscription creation: {str(e)}")
+                raise
+        else:
+            print(f"No user_id found for customer_id: {customer_id}")
+    
+    elif event_type == 'customer.subscription.updated':
+        print("Handling customer.subscription.updated event")
+        subscription_id = event_data.id
+
+        # Update existing subscription
+        update_data = {
+            "status": event_data.status,
+            "currentPeriodStart": datetime.fromtimestamp(event_data.current_period_start, tz=timezone.utc),
+            "currentPeriodEnd": datetime.fromtimestamp(event_data.current_period_end, tz=timezone.utc),
+            "nextBillingDate": datetime.fromtimestamp(event_data.current_period_end, tz=timezone.utc),
+            "cancelAtPeriodEnd": event_data["cancel_at_period_end"]
+        }
+        
+        await subscription_collection.update_one(
+            {"stripeSubscriptionId": subscription_id},
+            {"$set": update_data}
+        )
+
+    elif event_type == 'customer.subscription.deleted':
+        print("Handling customer.subscription.deleted event")
+        subscription_id = event_data.id
+        
+        await subscription_collection.update_one(
+            {"stripeSubscriptionId": subscription_id},
+            {"$set": {
+                "status": "canceled",
+                "canceled_at": datetime.fromtimestamp(event_data.canceled_at, tz=timezone.utc) if event_data.canceled_at else datetime.now(timezone.utc)
+            }}
+        )
+
+    elif event_type == 'customer.subscription.paused':
+        print("Handling customer.subscription.paused event")
+        subscription_id = event_data.id
+        
+        await subscription_collection.update_one(
+            {"stripeSubscriptionId": subscription_id},
+            {"$set": {
+                "status": "paused",
+                "pause_collection": event_data.pause_collection
+            }}
+        )
+
+    elif event_type == 'customer.subscription.resumed':
+        print("Handling customer.subscription.resumed event")
+        subscription_id = event_data.id
+        
+        await subscription_collection.update_one(
+            {"stripeSubscriptionId": subscription_id},
+            {"$set": {
+                "status": event_data.status,
+                "pause_collection": None
+            }}
+        )
+
+    elif event_type == 'invoice.paid':
+        print("Handling invoice.paid event")
+        subscription_id = event_data.subscription
+        
+        if subscription_id:
+            await subscription_collection.update_one(
+                {"stripeSubscriptionId": subscription_id},
+                {"$set": {
+                    "invoiceUrl": event_data.hosted_invoice_url,
+                    "status": "active"
+                }}
+            )
+
+    else:
+        print('Unhandled event type {}'.format(event['type']))
+
+    return {"status": "success"}

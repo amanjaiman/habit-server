@@ -9,11 +9,11 @@ from prompts import ACTIONABLE_RECOMMENDATIONS_PROMPT, AGGREGATE_SYSTEM_PROMPT, 
 from openai import OpenAI
 import os
 
-async def get_premium_users(user_collection) -> List[str]:
-    """Get all premium user IDs."""
+async def get_premium_users(subscription_collection) -> List[str]:
+    """Get all user IDs with active subscriptions."""
     premium_users = []
-    async for user in user_collection.find({"isPremium": True}):
-        premium_users.append(str(user["_id"]))
+    async for subscription in subscription_collection.find({"status": "active"}):
+        premium_users.append(str(subscription["userId"]))
     return premium_users
 
 async def get_user_habit_data(habit_collection, user_id: str, days: int = 14) -> List[HabitBase]:
@@ -155,12 +155,12 @@ async def get_correlation_insights(habit_data: Dict, habit_of_interest: str) -> 
         return []
 
 async def generate_all_analytics(
-    user_collection,
+    subscription_collection,
     habit_collection,
     analytics_collection
 ) -> None:
     """Generate analytics for all premium users."""
-    premium_users = await get_premium_users(user_collection)
+    premium_users = await get_premium_users(subscription_collection)
     
     for user_id in premium_users:
         habits = await get_user_habit_data(habit_collection, user_id)
@@ -220,19 +220,19 @@ async def generate_all_analytics(
 #        # MongoDB connection details
 #        MONGO_URI = os.environ.get("MONGO_URI")
 #        DATABASE_NAME = os.environ.get("MONGO_DATABASE_NAME", "")
-#        USER_COLLECTION_NAME = os.environ.get("MONGO_USER_COLLECTION_NAME", "")
+#        SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAME", "")
 #        HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
 #        ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
 
 #        # MongoDB client and collections
 #        client = AsyncIOMotorClient(MONGO_URI)
 #        db = client[DATABASE_NAME]
-#        user_collection = db[USER_COLLECTION_NAME]
+#        subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
 #        habit_collection = db[HABIT_COLLECTION_NAME]
 #        analytics_collection = db[ANALYTICS_COLLECTION_NAME]
 
 #        await generate_all_analytics(
-#            user_collection,
+#            subscription_collection,
 #            habit_collection, 
 #            analytics_collection
 #        )

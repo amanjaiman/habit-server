@@ -7,4 +7,5 @@ openai
 passlib
 pydantic
 pymongo
+stripe
 uvicorn
