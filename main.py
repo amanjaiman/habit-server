@@ -48,7 +48,11 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:8000",
         "https://674e18bf34bb7a4af4439ba7--habitai.netlify.app",
-        "https://habitai.netlify.app"
+        "https://habitai.netlify.app",
+        "https://habitsense.ai",
+        "https://www.habitsense.ai",
+        "http://habitsense.ai",
+        "http://www.habitsense.ai"
     ],
     allow_credentials=True,
     allow_methods=["*"],
