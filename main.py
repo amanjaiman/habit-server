@@ -297,8 +297,9 @@ async def create_checkout_session(user_id: str):
                 },
             ],
             mode="subscription",
-            success_url="https://habitai.netlify.app/settings?success=true",
-            cancel_url="https://habitai.netlify.app/settings?canceled=true",
+            success_url="https://habitsense.ai/settings?success=true",
+            cancel_url="https://habitsense.ai/settings?canceled=true",
+            allow_promotion_codes=True,
             metadata={
                 "user_id": user_id,
             },
