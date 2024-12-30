@@ -127,3 +127,48 @@ class LoginRequest(BaseModel):
 class ToggleCompletionRequest(BaseModel):
     date: str
     completed: bool
+
+class GroupHabitCompletion(BaseModel):
+    userId: str
+    date: str
+    completed: bool
+
+class GroupHabit(BaseModel):
+    id: str
+    name: str
+    emoji: str
+    color: Optional[str] = None
+    createdAt: str
+    completions: List[GroupHabitCompletion] = []
+    category: Optional[str] = None
+
+class GroupMember(BaseModel):
+    id: str
+    name: str
+    profileImage: Optional[str] = None
+    isAdmin: bool = False
+
+class Group(BaseModel):
+    id: str = None
+    name: str
+    description: Optional[str] = None
+    emoji: str
+    adminId: str
+    joinCode: str
+    habits: List[GroupHabit] = []
+    members: List[str] = []  # Keep this as List[str] for storage
+    memberDetails: List[GroupMember] = []  # Add this new field
+    createdAt: str
+
+class GroupCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    emoji: str
+
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    emoji: Optional[str] = None
+
+class GroupJoin(BaseModel):
+    joinCode: str

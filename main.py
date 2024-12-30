@@ -19,7 +19,14 @@ from models import (
     UserHabits,
     UserAnalytics,
     LoginRequest,
-    ToggleCompletionRequest
+    ToggleCompletionRequest,
+    GroupHabitCompletion,
+    GroupHabit,
+    Group,
+    GroupCreate,
+    GroupUpdate,
+    GroupJoin,
+    GroupMember
 )
 from scheduler import init_scheduler
 from contextlib import asynccontextmanager
@@ -66,6 +73,7 @@ USER_COLLECTION_NAME = os.environ.get("MONGO_USER_COLLECTION_NAME", "")
 HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
 ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
 SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAME", "")
+GROUP_COLLECTION_NAME = os.environ.get("MONGO_GROUP_COLLECTION_NAME", "groups")
 
 # MongoDB client and collection
 client = AsyncIOMotorClient(MONGO_URI)
@@ -74,6 +82,7 @@ user_collection = db[USER_COLLECTION_NAME]
 habit_collection = db[HABIT_COLLECTION_NAME]
 analytics_collection = db[ANALYTICS_COLLECTION_NAME]
 subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
+group_collection = db[GROUP_COLLECTION_NAME]
 
 # Add password hashing utility
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -440,3 +449,289 @@ async def webhook(request: Request):
         print('Unhandled event type {}'.format(event['type']))
 
     return {"status": "success"}
+
+# Group Management Endpoints
+@app.post("/groups", response_model=Group)
+async def create_group(group_data: GroupCreate, user_id: str):
+    join_code = await generate_unique_join_code()
+    
+    # Get creator's details
+    creator = await user_collection.find_one({"_id": ObjectId(user_id)})
+    if not creator:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    creator_details = GroupMember(
+        id=user_id,
+        name=creator["name"],
+        profileImage=creator.get("profileImage"),
+        isAdmin=True
+    )
+    
+    group = Group(
+        name=group_data.name,
+        description=group_data.description,
+        emoji=group_data.emoji,
+        adminId=user_id,
+        joinCode=join_code,
+        members=[user_id],
+        memberDetails=[creator_details],
+        habits=[],
+        createdAt=datetime.utcnow().isoformat()
+    )
+    
+    result = await group_collection.insert_one(group.dict(exclude={"id"}))
+    group.id = str(result.inserted_id)
+    
+    return group
+
+@app.get("/groups/user/{user_id}", response_model=List[Group])
+async def get_user_groups(user_id: str):
+    groups = []
+    async for group in group_collection.find({"members": user_id}):
+        # Fetch member details for each group
+        member_details = []
+        for member_id in group["members"]:
+            user = await user_collection.find_one({"_id": ObjectId(member_id)})
+            if user:
+                member_details.append(GroupMember(
+                    id=str(user["_id"]),
+                    name=user["name"],
+                    profileImage=user.get("profileImage"),
+                    isAdmin=member_id == group["adminId"]
+                ))
+        
+        group["id"] = str(group["_id"])
+        group["memberDetails"] = member_details
+        del group["_id"]
+        groups.append(group)
+    return groups
+
+@app.get("/groups/{group_id}", response_model=Group)
+async def get_group(group_id: str, user_id: str):
+    group = await group_collection.find_one({
+        "_id": ObjectId(group_id),
+        "members": user_id
+    })
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    # Fetch member details
+    member_details = []
+    for member_id in group["members"]:
+        user = await user_collection.find_one({"_id": ObjectId(member_id)})
+        if user:
+            member_details.append(GroupMember(
+                id=str(user["_id"]),
+                name=user["name"],
+                profileImage=user.get("profileImage"),
+                isAdmin=member_id == group["adminId"]
+            ))
+    
+    group["id"] = str(group["_id"])
+    group["memberDetails"] = member_details
+    del group["_id"]
+    return group
+
+@app.put("/groups/{group_id}", response_model=Group)
+async def update_group(group_id: str, group_data: GroupUpdate, user_id: str):
+    group = await group_collection.find_one({
+        "_id": ObjectId(group_id),
+        "adminId": user_id
+    })
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found or unauthorized")
+
+    update_data = group_data.dict(exclude_unset=True)
+    if update_data:
+        await group_collection.update_one(
+            {"_id": ObjectId(group_id)},
+            {"$set": update_data}
+        )
+    
+    updated_group = await group_collection.find_one({"_id": ObjectId(group_id)})
+    updated_group["id"] = str(updated_group["_id"])
+    del updated_group["_id"]
+    return updated_group
+
+@app.delete("/groups/{group_id}")
+async def delete_group(group_id: str, user_id: str):
+    result = await group_collection.delete_one({
+        "_id": ObjectId(group_id),
+        "adminId": user_id
+    })
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Group not found or unauthorized")
+    return {"message": "Group deleted successfully"}
+
+@app.post("/groups/join", response_model=Group)
+async def join_group(join_request: GroupJoin, user_id: str):
+    group = await group_collection.find_one({"joinCode": join_request.joinCode})
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    if user_id in group["members"]:
+        raise HTTPException(status_code=400, detail="Already a member of this group")
+    
+    # Get new member's details
+    user = await user_collection.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    new_member_details = GroupMember(
+        id=user_id,
+        name=user["name"],
+        profileImage=user.get("profileImage"),
+        isAdmin=False
+    )
+    
+    # Update both members array and memberDetails
+    await group_collection.update_one(
+        {"_id": group["_id"]},
+        {
+            "$push": {
+                "members": user_id,
+                "memberDetails": new_member_details.dict()
+            }
+        }
+    )
+    
+    # Get updated group
+    updated_group = await group_collection.find_one({"_id": group["_id"]})
+    updated_group["id"] = str(updated_group["_id"])
+    del updated_group["_id"]
+    
+    return updated_group
+
+@app.post("/groups/{group_id}/habits", response_model=GroupHabit)
+async def create_group_habit(group_id: str, habit: HabitBase, user_id: str):
+    group = await group_collection.find_one({
+        "_id": ObjectId(group_id),
+        "adminId": user_id
+    })
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found or unauthorized")
+    
+    group_habit = GroupHabit(
+        id=habit.id,
+        name=habit.name,
+        emoji=habit.emoji,
+        color=habit.color,
+        createdAt=habit.createdAt,
+        category=habit.category,
+        completions=[]
+    )
+    
+    await group_collection.update_one(
+        {"_id": ObjectId(group_id)},
+        {"$push": {"habits": group_habit.dict()}}
+    )
+    
+    return group_habit
+
+@app.post("/groups/{group_id}/habits/{habit_id}/toggle")
+async def toggle_group_habit_completion(
+    group_id: str,
+    habit_id: str,
+    toggle_request: ToggleCompletionRequest,
+    user_id: str
+):
+    group = await group_collection.find_one({
+        "_id": ObjectId(group_id),
+        "members": user_id
+    })
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found or not a member")
+
+    completion = GroupHabitCompletion(
+        userId=user_id,
+        date=toggle_request.date,
+        completed=toggle_request.completed
+    )
+
+    # Remove any existing completion for this user and date
+    await group_collection.update_one(
+        {"_id": ObjectId(group_id), "habits.id": habit_id},
+        {"$pull": {
+            "habits.$.completions": {
+                "userId": user_id,
+                "date": toggle_request.date
+            }
+        }}
+    )
+
+    # Add the new completion
+    if toggle_request.completed:
+        await group_collection.update_one(
+            {"_id": ObjectId(group_id), "habits.id": habit_id},
+            {"$push": {"habits.$.completions": completion.dict()}}
+        )
+
+    return {"message": "Habit completion toggled successfully"}
+
+@app.get("/groups/habits/user/{user_id}", response_model=List[Dict])
+async def get_all_group_habits(user_id: str):
+    groups = []
+    async for group in group_collection.find({"members": user_id}):
+        for habit in group["habits"]:
+            groups.append({
+                "groupId": str(group["_id"]),
+                "groupName": group["name"],
+                "habit": habit
+            })
+    return groups
+
+@app.put("/groups/{group_id}/habits/{habit_id}", response_model=GroupHabit)
+async def update_group_habit(group_id: str, habit_id: str, habit: HabitBase, user_id: str):
+    group = await group_collection.find_one({
+        "_id": ObjectId(group_id),
+        "adminId": user_id
+    })
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found or unauthorized")
+    
+    group_habit = GroupHabit(
+        id=habit.id,
+        name=habit.name,
+        emoji=habit.emoji,
+        color=habit.color,
+        createdAt=habit.createdAt,
+        category=habit.category,
+        completions=next((h["completions"] for h in group["habits"] if h["id"] == habit_id), [])
+    )
+    
+    await group_collection.update_one(
+        {"_id": ObjectId(group_id), "habits.id": habit_id},
+        {"$set": {"habits.$": group_habit.dict()}}
+    )
+    
+    return group_habit
+
+@app.delete("/groups/{group_id}/habits/{habit_id}")
+async def delete_group_habit(group_id: str, habit_id: str, user_id: str):
+    group = await group_collection.find_one({
+        "_id": ObjectId(group_id),
+        "adminId": user_id
+    })
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found or unauthorized")
+    
+    result = await group_collection.update_one(
+        {"_id": ObjectId(group_id)},
+        {"$pull": {"habits": {"id": habit_id}}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    
+    return {"message": "Habit deleted successfully"}
+
+# Add these helper functions
+async def generate_unique_join_code():
+    import random
+    import string
+    while True:
+        # Generate a 6-character alphanumeric code
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        # Check if code already exists
+        if not await group_collection.find_one({"joinCode": code}):
+            return code
