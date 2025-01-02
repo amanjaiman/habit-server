@@ -1,7 +1,57 @@
-from typing import List, Optional
-from pydantic import BaseModel
+from enum import Enum
+from typing import List, Optional, Union
+from pydantic import BaseModel, Field
 from bson import ObjectId
 from datetime import datetime
+
+# Add new enum for habit types
+class HabitType(str, Enum):
+    BOOLEAN = "boolean"
+    NUMERIC = "numeric"
+    RATING = "rating"
+
+# Add configuration models for different habit types
+class NumericHabitConfig(BaseModel):
+    goal: float
+    unit: str
+    higherIsBetter: bool = True
+
+class RatingHabitConfig(BaseModel):
+    min: int = 1
+    max: int = 5
+    goal: int = 5
+
+# Update HabitBase to include type and config
+class HabitBase(BaseModel):
+    id: str
+    name: str
+    emoji: str
+    color: Optional[str] = None
+    createdAt: str
+    # Change completions to support both boolean and numeric values
+    completions: dict[str, Union[bool, float]] = {}
+    category: Optional[str] = None
+    # Add new fields
+    type: HabitType = Field(default=HabitType.BOOLEAN)  # Default to boolean for backwards compatibility
+    config: Optional[Union[NumericHabitConfig, RatingHabitConfig]] = None
+
+# Update GroupHabitCompletion to support numeric values
+class GroupHabitCompletion(BaseModel):
+    userId: str
+    date: str
+    completed: Union[bool, float]
+
+# Update GroupHabit to match HabitBase
+class GroupHabit(BaseModel):
+    id: str
+    name: str
+    emoji: str
+    color: Optional[str] = None
+    createdAt: str
+    completions: List[GroupHabitCompletion] = []
+    category: Optional[str] = None
+    type: HabitType = Field(default=HabitType.BOOLEAN)
+    config: Optional[Union[NumericHabitConfig, RatingHabitConfig]] = None
 
 class Subscription(BaseModel):
     id: str = None
@@ -46,15 +96,6 @@ class UserUpdate(BaseModel):
         json_encoders = {
             ObjectId: str
         }
-
-class HabitBase(BaseModel):
-    id: str
-    name: str
-    emoji: str
-    color: Optional[str] = None
-    createdAt: str
-    completions: dict[str, bool] = {}
-    category: Optional[str] = None
 
 class KeyInsight(BaseModel):
     title: str
@@ -126,21 +167,7 @@ class LoginRequest(BaseModel):
 
 class ToggleCompletionRequest(BaseModel):
     date: str
-    completed: bool
-
-class GroupHabitCompletion(BaseModel):
-    userId: str
-    date: str
-    completed: bool
-
-class GroupHabit(BaseModel):
-    id: str
-    name: str
-    emoji: str
-    color: Optional[str] = None
-    createdAt: str
-    completions: List[GroupHabitCompletion] = []
-    category: Optional[str] = None
+    completed: Union[bool, float]
 
 class GroupMember(BaseModel):
     id: str

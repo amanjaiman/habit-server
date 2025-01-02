@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from passlib.context import CryptContext
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
+    HabitType,
     Subscription,
     User,
     UserUpdate,
@@ -190,6 +191,13 @@ async def get_habits(user_id: str):
 
 @app.post("/users/{user_id}/habits", response_model=HabitBase)
 async def create_habit(user_id: str, habit: HabitBase):
+    # Validate config based on habit type
+    if habit.type != HabitType.BOOLEAN and not habit.config:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Configuration required for {habit.type} habit type"
+        )
+    
     user_habits = await habit_collection.find_one({"userId": user_id})
     if not user_habits:
         raise HTTPException(status_code=404, detail="User habits not found")
@@ -219,12 +227,26 @@ async def delete_habit(user_id: str, habit_id: str):
 
 @app.put("/users/{user_id}/habits/{habit_id}", response_model=HabitBase)
 async def update_habit(user_id: str, habit_id: str, updated_habit: HabitBase):
+    # Convert the habit model to a dict and handle the config field properly
+    habit_dict = updated_habit.dict()
+    
+    # Only remove config if it's explicitly None, not if it contains valid zeros
+    if habit_dict.get('config') is None:
+        habit_dict.pop('config', None)
+    elif isinstance(habit_dict.get('config'), dict):
+        # Keep any numeric values, even if they're 0
+        config = {k: v for k, v in habit_dict['config'].items() if v is not None}
+        if config:
+            habit_dict['config'] = config
+        else:
+            habit_dict.pop('config', None)
+    
     update_result = await habit_collection.update_one(
         {
             "userId": user_id,
             "habits.id": habit_id
         },
-        {"$set": {"habits.$": updated_habit.dict()}}
+        {"$set": {"habits.$": habit_dict}}
     )
     
     if update_result.modified_count == 0:
@@ -249,7 +271,7 @@ async def toggle_habit_completion(
     if update_result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Habit not found")
     
-    return {"message": "Habit completion toggled successfully"}
+    return {"message": "Habit completion updated successfully"}
 
 @app.delete("/users/{user_id}/habits")
 async def delete_all_habits(user_id: str):
@@ -488,6 +510,18 @@ async def create_group(group_data: GroupCreate, user_id: str):
 async def get_user_groups(user_id: str):
     groups = []
     async for group in group_collection.find({"members": user_id}):
+        # Ensure habits have all required fields
+        for habit in group.get("habits", []):
+            # Ensure completions is a list
+            if "completions" not in habit or not isinstance(habit["completions"], list):
+                habit["completions"] = []
+            # Ensure type field exists
+            if "type" not in habit:
+                habit["type"] = HabitType.BOOLEAN
+            # Ensure config field exists
+            if "config" not in habit:
+                habit["config"] = None
+        
         # Fetch member details for each group
         member_details = []
         for member_id in group["members"]:
@@ -514,6 +548,18 @@ async def get_group(group_id: str, user_id: str):
     })
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
+    
+    # Ensure habits have all required fields
+    for habit in group.get("habits", []):
+        # Ensure completions is a list
+        if "completions" not in habit or not isinstance(habit["completions"], list):
+            habit["completions"] = []
+        # Ensure type field exists
+        if "type" not in habit:
+            habit["type"] = HabitType.BOOLEAN
+        # Ensure config field exists
+        if "config" not in habit:
+            habit["config"] = None
     
     # Fetch member details
     member_details = []
@@ -616,6 +662,8 @@ async def create_group_habit(group_id: str, habit: HabitBase, user_id: str):
         name=habit.name,
         emoji=habit.emoji,
         color=habit.color,
+        type=habit.type,
+        config=habit.config,
         createdAt=habit.createdAt,
         category=habit.category,
         completions=[]
@@ -642,11 +690,24 @@ async def toggle_group_habit_completion(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found or not a member")
 
-    completion = GroupHabitCompletion(
-        userId=user_id,
-        date=toggle_request.date,
-        completed=toggle_request.completed
-    )
+    # Find the habit to check its type
+    habit = next((h for h in group["habits"] if h["id"] == habit_id), None)
+    if not habit:
+        raise HTTPException(status_code=404, detail="Habit not found")
+
+    # Validate completion value based on habit type
+    if habit["type"] != HabitType.BOOLEAN:
+        if not isinstance(toggle_request.completed, (int, float)):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Numeric value required for {habit['type']} habit type"
+            )
+
+    completion = {
+        "userId": user_id,
+        "date": toggle_request.date,
+        "completed": toggle_request.completed
+    }
 
     # Remove any existing completion for this user and date
     await group_collection.update_one(
@@ -659,14 +720,17 @@ async def toggle_group_habit_completion(
         }}
     )
 
-    # Add the new completion
-    if toggle_request.completed:
+    # Add the new completion if it has a value
+    if toggle_request.completed is not None and (
+        isinstance(toggle_request.completed, bool) or 
+        (isinstance(toggle_request.completed, (int, float)) and toggle_request.completed > 0)
+    ):
         await group_collection.update_one(
             {"_id": ObjectId(group_id), "habits.id": habit_id},
-            {"$push": {"habits.$.completions": completion.dict()}}
+            {"$push": {"habits.$.completions": completion}}
         )
 
-    return {"message": "Habit completion toggled successfully"}
+    return {"message": "Habit completion updated successfully"}
 
 @app.get("/groups/habits/user/{user_id}", response_model=List[Dict])
 async def get_all_group_habits(user_id: str):
@@ -689,22 +753,47 @@ async def update_group_habit(group_id: str, habit_id: str, habit: HabitBase, use
     if not group:
         raise HTTPException(status_code=404, detail="Group not found or unauthorized")
     
-    group_habit = GroupHabit(
-        id=habit.id,
-        name=habit.name,
-        emoji=habit.emoji,
-        color=habit.color,
-        createdAt=habit.createdAt,
-        category=habit.category,
-        completions=next((h["completions"] for h in group["habits"] if h["id"] == habit_id), [])
-    )
+    # Validate config based on habit type
+    if habit.type != HabitType.BOOLEAN and not habit.config:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Configuration required for {habit.type} habit type"
+        )
     
-    await group_collection.update_one(
+    # Convert the habit model to a dict and handle the config field properly
+    habit_dict = habit.dict()
+    if habit_dict.get('config') is None:
+        habit_dict.pop('config', None)
+    elif isinstance(habit_dict.get('config'), dict):
+        config = {k: v for k, v in habit_dict['config'].items() if v is not None}
+        if config:
+            habit_dict['config'] = config
+        else:
+            habit_dict.pop('config', None)
+    
+    # Keep existing completions and ensure it's a list
+    existing_habit = next((h for h in group["habits"] if h["id"] == habit_id), None)
+    if existing_habit:
+        # Convert completions to list if it's a dict
+        completions = existing_habit.get("completions", [])
+        if isinstance(completions, dict):
+            completions = [
+                {"userId": user_id, "date": date, "completed": value}
+                for date, value in completions.items()
+            ]
+        habit_dict["completions"] = completions
+    else:
+        habit_dict["completions"] = []
+    
+    result = await group_collection.update_one(
         {"_id": ObjectId(group_id), "habits.id": habit_id},
-        {"$set": {"habits.$": group_habit.dict()}}
+        {"$set": {"habits.$": habit_dict}}
     )
     
-    return group_habit
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    
+    return habit_dict
 
 @app.delete("/groups/{group_id}/habits/{habit_id}")
 async def delete_group_habit(group_id: str, habit_id: str, user_id: str):
