@@ -97,6 +97,13 @@ class UserUpdate(BaseModel):
             ObjectId: str
         }
 
+class HabitForAnalytics(BaseModel):
+    name: str
+    category: Optional[str] = None
+    completions: dict[str, Union[bool, float]] = {}
+    type: HabitType = Field(default=HabitType.BOOLEAN)
+    config: Optional[Union[NumericHabitConfig, RatingHabitConfig]] = None
+
 class KeyInsight(BaseModel):
     title: str
     description: str
