@@ -264,31 +264,31 @@ async def generate_all_analytics(
                 upsert=True
             )
 
-if __name__ == "__main__":
-    import asyncio
-    from motor.motor_asyncio import AsyncIOMotorClient
-    import os
-    async def main():
+#if __name__ == "__main__":
+#    import asyncio
+#    from motor.motor_asyncio import AsyncIOMotorClient
+#    import os
+#    async def main():
         # MongoDB connection details
-        MONGO_URI = os.environ.get("MONGO_URI")
-        DATABASE_NAME = os.environ.get("MONGO_DATABASE_NAME", "")
-        SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAME", "")
-        HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
-        ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
-        GROUP_COLLECTION_NAME = os.environ.get("MONGO_GROUP_COLLECTION_NAME", "groups")
+#        MONGO_URI = os.environ.get("MONGO_URI")
+#        DATABASE_NAME = os.environ.get("MONGO_DATABASE_NAME", "")
+#        SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAME", "")
+#        HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
+#        ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
+#        GROUP_COLLECTION_NAME = os.environ.get("MONGO_GROUP_COLLECTION_NAME", "groups")
 
         # MongoDB client and collections
-        client = AsyncIOMotorClient(MONGO_URI)
-        db = client[DATABASE_NAME]
-        subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
-        habit_collection = db[HABIT_COLLECTION_NAME]
-        analytics_collection = db[ANALYTICS_COLLECTION_NAME]
-        group_collection = db[GROUP_COLLECTION_NAME]
-        await generate_all_analytics(
-            subscription_collection,
-            habit_collection, 
-            analytics_collection,
-            group_collection
-        )
+#        client = AsyncIOMotorClient(MONGO_URI)
+#        db = client[DATABASE_NAME]
+#        subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
+#        habit_collection = db[HABIT_COLLECTION_NAME]
+#        analytics_collection = db[ANALYTICS_COLLECTION_NAME]
+#        group_collection = db[GROUP_COLLECTION_NAME]
+#        await generate_all_analytics(
+#            subscription_collection,
+#            habit_collection, 
+#            analytics_collection,
+#            group_collection
+#        )
 
-    asyncio.run(main())
+#    asyncio.run(main())
