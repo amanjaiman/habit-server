@@ -39,7 +39,7 @@ def init_scheduler():
     # Run every Monday at 12 AM EST (5 AM UTC)
     scheduler.add_job(
         run_analytics,
-        CronTrigger(day_of_week='wed', hour=5, minute=34),
+        CronTrigger(day_of_week='thu', hour=5, minute=37),
         id='generate_analytics',
         name='Generate weekly analytics for premium users',
         replace_existing=True
