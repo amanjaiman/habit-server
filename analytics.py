@@ -47,7 +47,7 @@ async def get_user_group_habit_data(group_collection, user_id: str, days: int = 
                 category=habit.get("category"),
                 completions=dict(sorted(all_dates.items())),  # Sort by date
                 type=habit.get("type", HabitType.BOOLEAN),
-                config=habit.get("config")
+                config=habit.get("config", None)
             )
             
             group_habits.append(habit_for_analytics)
@@ -66,7 +66,7 @@ async def get_user_habit_data(habit_collection, user_id: str, days: int = 14) ->
     # Filter completions to only include dates within our range
     filtered_habits = []
     for habit in user_habits["habits"]:
-        habit_type = habit.get("type", None)
+        habit_type = habit.get("type", HabitType.BOOLEAN)
         habit_config = habit.get("config", None)
         # Generate all dates in range
         all_dates = {
@@ -218,7 +218,6 @@ async def generate_all_analytics(
         habits.extend(group_habits)
 
         if len(habits) > 0 and any(habit.completions for habit in habits):
-
             key_insights = await get_aggregate_key_insights(habits)
             print(f"Generated aggregate key insights for user {user_id}")
             time.sleep(1)
@@ -264,20 +263,22 @@ async def generate_all_analytics(
                 upsert=True
             )
 
+            print(f"Generated analytics for user {user_id}")
+
 #if __name__ == "__main__":
 #    import asyncio
 #    from motor.motor_asyncio import AsyncIOMotorClient
 #    import os
 #    async def main():
-        # MongoDB connection details
+#
+#       # MongoDB connection details
 #        MONGO_URI = os.environ.get("MONGO_URI")
 #        DATABASE_NAME = os.environ.get("MONGO_DATABASE_NAME", "")
 #        SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAME", "")
 #        HABIT_COLLECTION_NAME = os.environ.get("MONGO_HABIT_COLLECTION_NAME", "")
 #        ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", "")
 #        GROUP_COLLECTION_NAME = os.environ.get("MONGO_GROUP_COLLECTION_NAME", "groups")
-
-        # MongoDB client and collections
+#       # MongoDB client and collections
 #        client = AsyncIOMotorClient(MONGO_URI)
 #        db = client[DATABASE_NAME]
 #        subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
@@ -290,5 +291,4 @@ async def generate_all_analytics(
 #            analytics_collection,
 #            group_collection
 #        )
-
 #    asyncio.run(main())
