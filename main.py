@@ -53,7 +53,12 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
+        "https://habitsense.app",  # Mobile app origin
+        "https://localhost",       # Local development
+        "capacitor://localhost",   # Capacitor local
+        "http://localhost",        # Local development
+        "http://localhost:3000",   # React development server
+        # Add your production web domain if different
         "http://127.0.0.1:8000",
         "https://674e18bf34bb7a4af4439ba7--habitai.netlify.app",
         "https://habitai.netlify.app",
