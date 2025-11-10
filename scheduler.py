@@ -3,6 +3,7 @@ from apscheduler.triggers.cron import CronTrigger
 from analytics import generate_all_analytics
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import certifi
 
 # MongoDB connection details
 MONGO_URI = os.environ.get("MONGO_URI")
@@ -13,7 +14,7 @@ ANALYTICS_COLLECTION_NAME = os.environ.get("MONGO_ANALYTICS_COLLECTION_NAME", ""
 GROUP_COLLECTION_NAME = os.environ.get("MONGO_GROUP_COLLECTION_NAME", "")
 
 # MongoDB client and collections
-client = AsyncIOMotorClient(MONGO_URI)
+client = AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where(), tlsInsecure=True)
 db = client[DATABASE_NAME]
 subscription_collection = db[SUBSCRIPTION_COLLECTION_NAME]
 habit_collection = db[HABIT_COLLECTION_NAME]

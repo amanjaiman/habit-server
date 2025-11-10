@@ -1,5 +1,6 @@
 APScheduler
 bcrypt==4.0.1
+certifi
 fastapi
 fastapi-cors
 motor

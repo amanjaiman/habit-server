@@ -1,5 +1,6 @@
 import os
 
+import certifi
 from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -82,7 +83,7 @@ SUBSCRIPTION_COLLECTION_NAME = os.environ.get("MONGO_SUBSCRIPTION_COLLECTION_NAM
 GROUP_COLLECTION_NAME = os.environ.get("MONGO_GROUP_COLLECTION_NAME", "groups")
 
 # MongoDB client and collection
-client = AsyncIOMotorClient(MONGO_URI)
+client = AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where(), tlsInsecure=True)
 db = client[DATABASE_NAME]
 user_collection = db[USER_COLLECTION_NAME]
 habit_collection = db[HABIT_COLLECTION_NAME]
